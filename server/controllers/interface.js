@@ -15,6 +15,8 @@ const showDiffMsg = require('../../common/diff-view.js');
 const mergeJsonSchema = require('../../common/mergeJsonSchema');
 const fs = require('fs-extra');
 const path = require('path');
+const { httpRequestByNode } = require('../../common/postmanLib.js');
+const { assertSafeProxyTarget } = require('../../common/safe-request-url.js');
 
 // const annotatedCss = require("jsondiffpatch/public/formatters-styles/annotated.css");
 // const htmlCss = require("jsondiffpatch/public/formatters-styles/html.css");
@@ -430,6 +432,71 @@ class interfaceController extends baseController {
       ctx.body = yapi.commons.resReturn(result);
     } catch (e) {
       ctx.body = yapi.commons.resReturn(null, 402, e.message);
+    }
+  }
+
+  getRunProxyConfig() {
+    const cfg = (yapi.WEBCONFIG && yapi.WEBCONFIG.runProxy) || {};
+    return {
+      timeout: Math.min(Math.max(parseInt(cfg.timeout, 10) || 30000, 1000), 120000),
+      maxBodySize: Math.min(parseInt(cfg.maxBodySize, 10) || 2 * 1024 * 1024, 10 * 1024 * 1024),
+      allowPrivateIp: cfg.allowPrivateIp !== false
+    };
+  }
+
+  /**
+   * 服务端代发真实接口请求（运行页「服务器代理」）
+   * @interface /interface/run
+   * @method POST
+   */
+  async run(ctx) {
+    const params = ctx.params || {};
+    const project_id = parseInt(params.project_id, 10);
+    const method = String(params.method || 'GET').toUpperCase();
+    const targetUrl = params.url;
+
+    if (!project_id) {
+      return (ctx.body = yapi.commons.resReturn(null, 400, '项目 id 不能为空'));
+    }
+    if (!targetUrl) {
+      return (ctx.body = yapi.commons.resReturn(null, 400, '请求地址不能为空'));
+    }
+
+    try {
+      const project = await this.projectModel.getBaseInfo(project_id);
+      if (!project) {
+        return (ctx.body = yapi.commons.resReturn(null, 406, '不存在的项目'));
+      }
+      if (project.project_type === 'private') {
+        if ((await this.checkAuth(project._id, 'project', 'view')) !== true) {
+          return (ctx.body = yapi.commons.resReturn(null, 406, '没有权限'));
+        }
+      }
+
+      const proxyConfig = this.getRunProxyConfig();
+      const safe = assertSafeProxyTarget(targetUrl, { allowPrivateIp: proxyConfig.allowPrivateIp });
+      if (!safe.ok) {
+        return (ctx.body = yapi.commons.resReturn(null, 400, safe.message));
+      }
+
+      const data = await httpRequestByNode({
+        method,
+        url: targetUrl,
+        headers: params.headers,
+        data: params.data,
+        timeout: proxyConfig.timeout,
+        maxBodySize: proxyConfig.maxBodySize
+      });
+
+      return (ctx.body = yapi.commons.resReturn({
+        header: data.res.header,
+        status: data.res.status,
+        statusText: data.res.statusText,
+        body: data.res.body,
+        runTime: data.runTime
+      }));
+    } catch (e) {
+      return (ctx.body = yapi.commons.resReturn(null, 402, e.message));
     }
   }
 

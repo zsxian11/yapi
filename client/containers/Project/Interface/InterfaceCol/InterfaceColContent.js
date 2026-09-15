@@ -4,7 +4,7 @@ import PropTypes from 'prop-types';
 import { withRouter } from 'react-router';
 import { Link } from 'react-router-dom';
 //import constants from '../../../../constants/variable.js'
-import { Tooltip, Icon,Input, Button, Row, Col, Spin, Modal, message, Select, Switch } from 'antd';
+import { Tooltip, Icon,Input, Button, Row, Col, Spin, Modal, message, Select, Switch, Radio } from 'antd';
 import {
   fetchInterfaceColList,
   fetchCaseList,
@@ -21,7 +21,6 @@ import * as resolve from 'table-resolver';
 import axios from 'axios';
 import CaseReport from './CaseReport.js';
 import _ from 'underscore';
-import { initCrossRequest } from 'client/components/Postman/CheckCrossInstall.js';
 import { produce } from 'immer';
 import {InsertCodeMap} from 'client/components/Postman/Postman.js'
 
@@ -114,7 +113,7 @@ class InterfaceColContent extends Component {
       reports: {},
       visible: false,
       curCaseid: null,
-      hasPlugin: false,
+      transport: 'server',
 
       advVisible: false,
       curScript: '',
@@ -179,14 +178,6 @@ class InterfaceColContent extends Component {
     if (currColId && currColId != 0) {
       await this.handleColIdChange(currColId)
     }
-
-    this._crossRequestInterval = initCrossRequest(hasPlugin => {
-      this.setState({ hasPlugin: hasPlugin });
-    });
-  }
-
-  componentWillUnmount() {
-    clearInterval(this._crossRequestInterval);
   }
 
   // 更新分类简介
@@ -320,6 +311,9 @@ class InterfaceColContent extends Component {
     }));
 
     try {
+      options.taskId = this.props.curUid;
+      options.project_id = interfaceData.project_id;
+      options.transport = this.state.transport;
       let data = await crossRequest(options, interfaceData.pre_script, interfaceData.after_script, createContext(
         this.props.curUid,
         this.props.match.params.id,
@@ -1036,47 +1030,40 @@ class InterfaceColContent extends Component {
             />
           </Col>
           <Col span={9}>
-            {this.state.hasPlugin ? (
-              <div
-                style={{
-                  float: 'right',
-                  paddingTop: '8px'
-                }}
+            <div
+              style={{
+                float: 'right',
+                paddingTop: '8px'
+              }}
+            >
+              <Radio.Group
+                value={this.state.transport}
+                onChange={e => this.setState({ transport: e.target.value })}
+                style={{ marginRight: '8px' }}
               >
-                {this.props.curProjectRole !== 'guest' && (
-                  <Tooltip title="在 YApi 服务端跑自动化测试，测试环境不能为私有网络，请确保 YApi 服务器可以访问到自动化测试环境domain">
-                    <Button
-                      style={{
-                        marginRight: '8px'
-                      }}
-                      onClick={this.autoTests}
-                    >
-                      服务端测试
-                    </Button>
-                  </Tooltip>
-                )}
-                <Button onClick={this.openCommonSetting} style={{
-                        marginRight: '8px'
-                      }} >通用规则配置</Button>
-                &nbsp;
-                <Button type="primary" onClick={this.executeTests}>
-                  开始测试
-                </Button>
-              </div>
-            ) : (
-              <Tooltip title="请安装 cross-request Chrome 插件">
-                <Button
-                  disabled
-                  type="primary"
-                  style={{
-                    float: 'right',
-                    marginTop: '8px'
-                  }}
-                >
-                  开始测试
-                </Button>
-              </Tooltip>
-            )}
+                <Radio.Button value="server">服务器代理</Radio.Button>
+                <Radio.Button value="browser">浏览器直发</Radio.Button>
+              </Radio.Group>
+              {this.props.curProjectRole !== 'guest' && (
+                <Tooltip title="在 YApi 服务端跑自动化测试，测试环境不能为私有网络，请确保 YApi 服务器可以访问到自动化测试环境domain">
+                  <Button
+                    style={{
+                      marginRight: '8px'
+                    }}
+                    onClick={this.autoTests}
+                  >
+                    服务端测试
+                  </Button>
+                </Tooltip>
+              )}
+              <Button onClick={this.openCommonSetting} style={{
+                      marginRight: '8px'
+                    }} >通用规则配置</Button>
+              &nbsp;
+              <Button type="primary" onClick={this.executeTests}>
+                开始测试
+              </Button>
+            </div>
           </Col>
         </Row>
 

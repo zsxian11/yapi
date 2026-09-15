@@ -14,7 +14,8 @@ import {
   Switch,
   Row,
   Col,
-  Alert
+  Alert,
+  Radio
 } from 'antd';
 import constants from '../../constants/variable.js';
 import AceEditor from 'client/components/AceEditor/AceEditor';
@@ -22,7 +23,6 @@ import _ from 'underscore';
 import { isJson, deepCopyJson, json5_parse } from '../../common.js';
 import axios from 'axios';
 import ModalPostman from '../ModalPostman/index.js';
-import CheckCrossInstall, { initCrossRequest } from './CheckCrossInstall.js';
 import './Postman.scss';
 import ProjectEnv from '../../containers/Project/Setting/ProjectEnv/index.js';
 import json5 from 'json5';
@@ -38,11 +38,23 @@ const {
 const plugin = require('client/plugin.js');
 
 const createContext = require('common/createContext')
+const { isLoopbackUrl } = require('common/safe-request-url.js');
 
 const HTTP_METHOD = constants.HTTP_METHOD;
 const InputGroup = Input.Group;
 const Option = Select.Option;
 const Panel = Collapse.Panel;
+const RUN_TRANSPORT_KEY = 'yapi_run_transport';
+
+function readStoredTransport() {
+  try {
+    const value = window.localStorage.getItem(RUN_TRANSPORT_KEY);
+    if (value === 'browser' || value === 'server') {
+      return value;
+    }
+  } catch (e) {}
+  return 'server';
+}
 
 export const InsertCodeMap = [
   {
@@ -129,7 +141,7 @@ export default class Run extends Component {
       mock_verify: false,
       enable_script: false,
       test_script: '',
-      hasPlugin: true,
+      transport: readStoredTransport(),
       inputValue: '',
       cursurPosition: { row: 1, column: -1 },
       envModalVisible: false,
@@ -272,16 +284,7 @@ export default class Run extends Component {
   }
 
   UNSAFE_componentWillMount() {
-    this._crossRequestInterval = initCrossRequest(hasPlugin => {
-      this.setState({
-        hasPlugin: hasPlugin
-      });
-    });
     this.initState(this.props.data);
-  }
-
-  componentWillUnmount() {
-    clearInterval(this._crossRequestInterval);
   }
 
   UNSAFE_componentWillReceiveProps(nextProps) {
@@ -320,6 +323,20 @@ export default class Run extends Component {
     });
   };
 
+  setTransport = e => {
+    const transport = e.target.value;
+    try {
+      window.localStorage.setItem(RUN_TRANSPORT_KEY, transport);
+    } catch (err) {}
+    this.setState({ transport });
+  };
+
+  isCurrentTargetLoopback = () => {
+    const env = this.state.env || [];
+    const curr = env.find(item => item.name === this.state.case_env) || env[0];
+    return !!(curr && curr.domain && isLoopbackUrl(curr.domain));
+  };
+
   reqRealInterface = async () => {
     if (this.state.loading === true) {
       this.setState({
@@ -344,6 +361,8 @@ export default class Run extends Component {
 
     try {
       options.taskId = this.props.curUid;
+      options.project_id = this.props.projectId;
+      options.transport = this.state.transport;
       result = await crossRequest(options, options.pre_script || this.state.pre_script, options.after_script || this.state.after_script, createContext(
         this.props.curUid,
         this.props.projectId,
@@ -570,7 +589,7 @@ export default class Run extends Component {
   render() {
     const {
       method,
-      env,
+      env = [],
       path,
       req_params = [],
       req_headers = [],
@@ -580,7 +599,7 @@ export default class Run extends Component {
       loading,
       case_env,
       inputValue,
-      hasPlugin
+      transport
     } = this.state;
     // console.log(env);
     return (
@@ -609,7 +628,25 @@ export default class Run extends Component {
             <ProjectEnv projectId={this.props.data.project_id} onOk={this.handleEnvOk} />
           </Modal>
         )}
-        <CheckCrossInstall hasPlugin={hasPlugin} />
+        <div className="run-transport">
+          <span className="run-transport-label">发送方式</span>
+          <Radio.Group value={transport} onChange={this.setTransport}>
+            <Radio.Button value="server">服务器代理</Radio.Button>
+            <Radio.Button value="browser">浏览器直发</Radio.Button>
+          </Radio.Group>
+          <Alert
+            style={{ marginTop: 8 }}
+            type={transport === 'browser' ? 'info' : this.isCurrentTargetLoopback() ? 'warning' : 'info'}
+            showIcon
+            message={
+              transport === 'browser'
+                ? '请求从你的浏览器发出，可访问本机 localhost。目标接口需允许 CORS（Access-Control-Allow-Origin 包含当前 YApi 站点）；Chrome 可能要求允许本站点访问本地网络。'
+                : this.isCurrentTargetLoopback()
+                  ? '当前环境指向本机 localhost。请求将由 YApi 服务器发出，打不到你电脑上的服务，请改用浏览器直发。'
+                  : '请求由 YApi 服务器发出，可访问服务器网络能到达的公网或内网地址，无需安装插件。'
+            }
+          />
+        </div>
 
         <div className="url">
           <InputGroup compact style={{ display: 'flex' }}>
@@ -644,18 +681,8 @@ export default class Run extends Component {
             />
           </InputGroup>
 
-          <Tooltip
-            placement="bottom"
-            title={(() => {
-              if (hasPlugin) {
-                return '发送请求';
-              } else {
-                return '请安装 cross-request 插件';
-              }
-            })()}
-          >
+          <Tooltip placement="bottom" title="发送请求">
             <Button
-              disabled={!hasPlugin}
               onClick={this.reqRealInterface}
               type="primary"
               style={{ marginLeft: 10 }}

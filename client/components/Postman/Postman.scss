@@ -151,6 +151,13 @@
   .has-plugin, .req-part, .resp-part {
     margin-bottom: 16px;
   }
+  .run-transport {
+    margin: 0 10px 16px;
+    .run-transport-label {
+      margin-right: 8px;
+      color: #666;
+    }
+  }
   .url {
     display: flex;
     margin: 24px 10px;

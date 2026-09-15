@@ -9,6 +9,7 @@ const qs = require('qs');
 const CryptoJS = require('crypto-js');
 const jsrsasign = require('jsrsasign');
 const https = require('https');
+const { isLoopbackUrl } = require('./safe-request-url');
 
 const isNode = typeof global == 'object' && global.global === global;
 const ContentTypeMap = {
@@ -51,61 +52,95 @@ const getStorage = async (id)=>{
   }
 }
 
-async function httpRequestByNode(options) {
-  function handleRes(response) {
-    if (!response || typeof response !== 'object') {
-      return {
-        res: {
-          status: 500,
-          body: isNode
-            ? '请求出错, 内网服务器自动化测试无法访问到，请检查是否为内网服务器！'
-            : '请求出错'
+function handleRequestPayload(options) {
+  let contentTypeItem;
+  if (!options) return;
+  if (typeof options.headers === 'object' && options.headers) {
+    Object.keys(options.headers).forEach(key => {
+      if (/content-type/i.test(key)) {
+        if (options.headers[key]) {
+          contentTypeItem = options.headers[key]
+            .split(';')[0]
+            .trim()
+            .toLowerCase();
         }
-      };
+      }
+      if (!options.headers[key]) delete options.headers[key];
+    });
+
+    if (
+      contentTypeItem === 'application/x-www-form-urlencoded' &&
+      typeof options.data === 'object' &&
+      options.data
+    ) {
+      options.data = qs.stringify(options.data);
     }
+  }
+}
+
+function formatHttpResult(response, runTime) {
+  if (!response || typeof response !== 'object') {
     return {
       res: {
-        header: response.headers,
-        status: response.status,
-        body: response.data
-      }
+        status: 500,
+        body: isNode
+          ? '请求出错, 内网服务器自动化测试无法访问到，请检查是否为内网服务器！'
+          : '请求出错'
+      },
+      runTime
     };
   }
+  return {
+    res: {
+      header: response.headers || {},
+      status: response.status,
+      statusText: response.statusText,
+      body: response.data
+    },
+    runTime
+  };
+}
 
-  function handleData() {
-    let contentTypeItem;
-    if (!options) return;
-    if (typeof options.headers === 'object' && options.headers) {
-      Object.keys(options.headers).forEach(key => {
-        if (/content-type/i.test(key)) {
-          if (options.headers[key]) {
-            contentTypeItem = options.headers[key]
-              .split(';')[0]
-              .trim()
-              .toLowerCase();
-          }
-        }
-        if (!options.headers[key]) delete options.headers[key];
-      });
-
-      if (
-        contentTypeItem === 'application/x-www-form-urlencoded' &&
-        typeof options.data === 'object' &&
-        options.data
-      ) {
-        options.data = qs.stringify(options.data);
-      }
+function sanitizeRequestHeaders(headers, extraBlocked) {
+  const result = {};
+  const blocked = extraBlocked || [];
+  if (!headers || typeof headers !== 'object') return result;
+  Object.keys(headers).forEach(key => {
+    if (!headers[key]) return;
+    if (/^(host|connection|content-length|transfer-encoding|keep-alive|te|trailer|upgrade|proxy-authenticate|proxy-authorization)$/i.test(key)) {
+      return;
     }
+    if (blocked.some(name => name.toLowerCase() === String(key).toLowerCase())) {
+      return;
+    }
+    result[key] = headers[key];
+  });
+  return result;
+}
+
+function methodAllowsBody(method) {
+  const name = String(method || 'GET').toUpperCase();
+  return HTTP_METHOD[name] && HTTP_METHOD[name].request_body;
+}
+
+async function httpRequestByNode(options) {
+  const started = Date.now();
+  function handleRes(response) {
+    return formatHttpResult(response, Date.now() - started);
   }
 
   try {
-    handleData(options);
+    handleRequestPayload(options);
+    const timeout = Math.min(Math.max(parseInt(options.timeout, 10) || 30000, 1000), 120000);
+    const maxContentLength = parseInt(options.maxBodySize, 10) || 2 * 1024 * 1024;
     let response = await axios({
       method: options.method,
       url: options.url,
-      headers: options.headers,
-      timeout: 10000,
+      headers: sanitizeRequestHeaders(options.headers),
+      timeout,
       maxRedirects: 0,
+      maxContentLength,
+      maxBodyLength: maxContentLength,
       httpsAgent: new https.Agent({
         rejectUnauthorized: false
       }),
@@ -121,6 +156,130 @@ async function httpRequestByNode(options) {
       });
     }
     return handleRes(err.response);
+  }
+}
+
+async function httpRequestByServer(options) {
+  const started = Date.now();
+  try {
+    handleRequestPayload(options);
+    const response = await axios.post(
+      '/api/interface/run',
+      {
+        project_id: options.project_id,
+        method: options.method,
+        url: options.url,
+        headers: options.headers,
+        data: options.data
+      },
+      {
+        timeout: 125000
+      }
+    );
+    if (!response.data || response.data.errcode !== 0) {
+      const message = (response.data && response.data.errmsg) || '服务器代理请求失败';
+      return {
+        res: {
+          header: {},
+          status: null,
+          body: message
+        },
+        runTime: Date.now() - started
+      };
+    }
+    const payload = response.data.data || {};
+    return {
+      res: {
+        header: payload.header || {},
+        status: payload.status,
+        statusText: payload.statusText,
+        body: payload.body
+      },
+      runTime: payload.runTime || Date.now() - started
+    };
+  } catch (err) {
+    const message =
+      (err.response && err.response.data && err.response.data.errmsg) ||
+      err.message ||
+      '服务器代理请求失败';
+    return {
+      res: {
+        header: {},
+        status: null,
+        body: message
+      },
+      runTime: Date.now() - started
+    };
+  }
+}
+
+async function httpRequestByBrowser(options) {
+  const started = Date.now();
+  handleRequestPayload(options);
+  const method = String(options.method || 'GET').toUpperCase();
+  const fetchOptions = {
+    method,
+    headers: sanitizeRequestHeaders(options.headers, [
+      'cookie',
+      'cookie2',
+      'origin',
+      'referer',
+      'host'
+    ]),
+    credentials: 'omit',
+    mode: 'cors',
+    redirect: 'follow'
+  };
+
+  if (methodAllowsBody(method) && typeof options.data !== 'undefined' && options.data !== null) {
+    if (typeof options.data === 'string' || (typeof FormData !== 'undefined' && options.data instanceof FormData)) {
+      fetchOptions.body = options.data;
+    } else {
+      const contentType = Object.keys(fetchOptions.headers).find(key => /content-type/i.test(key));
+      if (contentType && /application\/json/i.test(fetchOptions.headers[contentType])) {
+        fetchOptions.body = typeof options.data === 'string' ? options.data : JSON.stringify(options.data);
+      } else {
+        fetchOptions.body =
+          typeof options.data === 'object' ? qs.stringify(options.data) : String(options.data);
+      }
+    }
+  }
+
+  if (isLoopbackUrl(options.url)) {
+    fetchOptions.targetAddressSpace = 'loopback';
+  }
+
+  try {
+    const response = await fetch(options.url, fetchOptions);
+    const header = {};
+    if (response.headers && typeof response.headers.forEach === 'function') {
+      response.headers.forEach((value, key) => {
+        header[key] = value;
+      });
+    }
+    const text = await response.text();
+    const body = json_parse(text);
+    return {
+      res: {
+        header,
+        status: response.status,
+        statusText: response.statusText,
+        body
+      },
+      runTime: Date.now() - started
+    };
+  } catch (err) {
+    return {
+      res: {
+        header: {},
+        status: null,
+        body:
+          '浏览器直发失败：' +
+          (err && err.message ? err.message : '网络错误') +
+          '。若目标是 localhost，请确认本机服务已启动，并为该接口配置 CORS（Access-Control-Allow-Origin 包含当前 YApi 站点）。Chrome 还需允许本站点访问本地网络。'
+      },
+      runTime: Date.now() - started
+    };
   }
 }
 
@@ -316,8 +475,9 @@ async function crossRequest(defaultOptions, preScript, afterScript, commonContex
 
   if (isNode) {
     data = await httpRequestByNode(options);
-    data.req = options;
-  } else {
+  } else if (options.transport === 'browser') {
+    data = await httpRequestByBrowser(options);
+  } else if (options.transport === 'plugin' && typeof window !== 'undefined' && window.crossRequest) {
     data = await new Promise((resolve, reject) => {
       options.error = options.success = function(res, header, data) {
         let message = '';
@@ -325,7 +485,7 @@ async function crossRequest(defaultOptions, preScript, afterScript, commonContex
           res = json_parse(data.res.body);
           data.res.body = res;
         }
-        if (!isNode) message = '请求异常，请检查 chrome network 错误信息... https://juejin.im/post/5c888a3e5188257dee0322af 通过该链接查看教程"）';
+        message = '请求异常，请检查 chrome network 错误信息';
         if (isNaN(data.res.status)) {
           reject({
             body: res || message,
@@ -338,7 +498,10 @@ async function crossRequest(defaultOptions, preScript, afterScript, commonContex
 
       window.crossRequest(options);
     });
+  } else {
+    data = await httpRequestByServer(options);
   }
+  data.req = options;
 
   if (afterScript) {
     context.responseData = data.res.body;
@@ -481,3 +644,4 @@ exports.handleContentType = handleContentType;
 exports.crossRequest = crossRequest;
 exports.handleCurrDomain = handleCurrDomain;
 exports.checkNameIsExistInArray = checkNameIsExistInArray;
+exports.httpRequestByNode = httpRequestByNode;

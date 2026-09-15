@@ -1,0 +1,12 @@
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+*.log
+
+# 本地运行配置（含数据库连接等环境信息）
+config.json
+
+# 构建/测试产物
+coverage/
+dist/

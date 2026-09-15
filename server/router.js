@@ -354,6 +354,11 @@ let routerConfig = {
       method: 'get'
     },
     {
+      action: 'run',
+      path: 'run',
+      method: 'post'
+    },
+    {
       action: 'up',
       path: 'up',
       method: 'post'
