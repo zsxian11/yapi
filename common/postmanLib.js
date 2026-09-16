@@ -10,8 +10,8 @@ const CryptoJS = require('crypto-js');
 const jsrsasign = require('jsrsasign');
 const https = require('https');
 const { isLoopbackUrl } = require('./safe-request-url');
-
-const isNode = typeof global == 'object' && global.global === global;
+// Vite define `{ global: 'globalThis' }` breaks `global.global === global`.
+const isNode = typeof window === 'undefined';
 const ContentTypeMap = {
   'application/json': 'json',
   'application/xml': 'xml',

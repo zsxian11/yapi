@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+.cursor
+.DS_Store
+node_modules
+coverage
+dist
+*.log
+config.json
+npm-debug.log*
+.nvmrc
+AGENTS.md

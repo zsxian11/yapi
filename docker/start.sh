@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+node /yapi/vendors/docker/apply-env-config.js
+
 if [ ! -f /yapi/init.lock ]; then
   if ! node /yapi/vendors/server/install.js; then
     node -e "

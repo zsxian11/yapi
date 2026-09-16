@@ -12,16 +12,21 @@ services:
       start_period: 10s
 
   yapi:
-    build: .
+    image: zsxian22/yapi:0.1.0
     restart: unless-stopped
-    container_name: yapi
     ports:
       - "3000:3000"
+    environment:
+      TZ: Asia/Shanghai
+      YAPI_DB_SERVERNAME: mongo
+      YAPI_DB_PORT: "27017"
+      YAPI_DB_DATABASE: yapi
+      YAPI_ADMIN_ACCOUNT: admin@admin.com
+      YAPI_PASSKEY_RP_ID: localhost
+      YAPI_PASSKEY_ORIGIN: http://localhost:3000
     depends_on:
       mongo:
         condition: service_healthy
-    volumes:
-      - ./docker/config.json:/yapi/config.json:ro
 
 volumes:
   mongo-data:

@@ -1,8 +1,6 @@
 const _ = require('underscore');
 const axios = require('axios');
-
-
-const isNode = typeof global == 'object' && global.global === global;
+const isNode = typeof window === 'undefined';
 
 async function handle(
   res,

@@ -10,3 +10,7 @@ config.json
 # 构建/测试产物
 coverage/
 dist/
+# scripts/generate-plugin-module.js 生成
+client/plugin-module.js
+# npm run dev-copy-icon 从 static/iconfont 复制而来
+iconfont/
